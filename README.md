@@ -1,5 +1,3 @@
-# NHA-4-79
-Auto generated repo
 # 🎓 University Boot
 
 **An automated, event-driven data pipeline for real-time student attendance tracking and reporting.**
@@ -69,11 +67,11 @@ university-boot/
 
 `fact_attendance` sits at the center, linked to `dim_student`, `dim_course`, `dim_professor`, `dim_session`, `dim_department`, and `dim_date`.
 
-![Data Warehouse Schema](https://github.com/nhahub/NHA-4-079/blob/main/schema%20DWH.png)
+![Data Warehouse Schema](assets/schema_DWH.png)
 
 ## 📊 Power BI Dashboard
 
-![University Attendance Analytics Dashboard](https://github.com/nhahub/NHA-4-079/blob/main/dashboard.png)
+![University Attendance Analytics Dashboard](assets/dashboard.png)
 
 ## 🛠️ Tech Stack
 
@@ -152,10 +150,10 @@ Graduation project — DEPI Microsoft Data Engineering Track, supervised by **En
 
 | Name | Role | GitHub |
 |------|------|--------|
-| Abdelrahman Mohamed Saeed | Data Engineer | [AbdelrahmanM00hammed](https://github.com/AbdelrahmanM00hammed) |
+| Abdelrahman Mohamed Saeed | Data Engineer | [AbdelrahmanM00hammed)](https://github.com/AbdelrahmanM00hammed) |
 | Bishoy Halim | Data Engineer | [bishoyhanyhalim](https://github.com/bishoyhanyhalim/) |
 | David Wagih | Data Engineer | [Dov-elhacker](https://github.com/Dov-elhacker) |
-| Ahmed El-Qadi | Data Engineer | [ahmedmohamedalqadi](https://github.com/ahmedmohamedalqadi9999-hash) |
+| Ahmed El-Kadi | Data Engineer | [ahmedmohamedalqadi](https://github.com/ahmedmohamedalqadi9999-hash) |
 | Ahmed Ramadan | Data Engineer | [Ahmed-Ramadan-Ismail](https://github.com/Ahmed-Ramadan-Ismail) |
 
 ## 📄 License
