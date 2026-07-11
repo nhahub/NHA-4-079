@@ -152,11 +152,11 @@ Graduation project — DEPI Microsoft Data Engineering Track, supervised by **En
 
 | Name | Role | GitHub |
 |------|------|--------|
-| Abdelrahman Mohamed Saeed | Data Engineer | [github.com/your-username](https://github.com/your-username) |
-| Bishoy Halim | Data Engineer | [github.com/username-2](https://github.com/username-2) |
-| David Wagih | Data Engineer | [github.com/username-3](https://github.com/username-3) |
-| Ahmed El-Kadi | Data Engineer | [github.com/username-4](https://github.com/username-4) |
-| Ahmed Ramadan | Data Engineer | [github.com/username-5](https://github.com/username-5) |
+| Abdelrahman Mohamed Saeed | Data Engineer | [github.com/your-username](https://github.com/AbdelrahmanM00hammed) |
+| Bishoy Halim | Data Engineer | [github.com/username-2](https://github.com/bishoyhanyhalim/) |
+| David Wagih | Data Engineer | [github.com/username-3](https://github.com/Dov-elhacker) |
+| Ahmed El-Qadi | Data Engineer | [github.com/username-4](https://github.com/ahmedmohamedalqadi9999-hash) |
+| Ahmed Ramadan | Data Engineer | [github.com/username-5](https://github.com/Ahmed-Ramadan-Ismail) |
 
 ## 📄 License
 
