@@ -1,10 +1,11 @@
-!pip install python-telegram-bot asyncpg nest_asyncio
+# pip install python-telegram-bot asyncpg nest_asyncio
 
 import json, logging, time
 from typing import Optional
 
+
 import nest_asyncio
-nest_asyncio.apply()          
+nest_asyncio.apply()
 
 import asyncpg
 from telegram import (
@@ -16,14 +17,10 @@ from telegram.ext import (
     ContextTypes, ConversationHandler, MessageHandler, filters,
 )
 
-# ═══════════════════════════════════════════════════════════════
-#  CONFIG
-# ═══════════════════════════════════════════════════════════════
-BOT_TOKEN = "و حطوا لينك البوت هنا"
 
-# Supabase → Settings → Database → Connection String → URI (Direct, port 5432)
-# ⚠️ استخدم Direct Connection وليس Pooler عشان الـ stored functions تشتغل صح
-DATABASE_URL = ("غيروا ال url ده يا شباب ")
+BOT_TOKEN = "put Bot token"
+
+DATABASE_URL = ("put database url")
 
 logging.basicConfig(
     format="%(asctime)s │ %(levelname)s │ %(message)s",
@@ -40,11 +37,7 @@ def pool() -> asyncpg.Pool:
     return _pool
 
 
-# ═══════════════════════════════════════════════════════════════
 #  DATABASE LAYER
-#  يستخدم الـ Schema الموجود على Supabase كما هو —
-#  fn_get_student_by_telegram, fn_upsert_bot_state, mv_student_schedule
-# ═══════════════════════════════════════════════════════════════
 
 async def db_student_by_tg(tg_id: int) -> Optional[asyncpg.Record]:
     async with pool().acquire() as c:
@@ -90,40 +83,57 @@ async def db_schedule(tg_id: int) -> list:
     async with pool().acquire() as c:
         return await c.fetch(
             """
-            SELECT course_code, course_name,
-                   session_type::text AS session_type,
-                   day_of_week::text  AS day_of_week,
-                   start_time, end_time, location,
-                   professor_name, semester::text AS semester
-            FROM   mv_student_schedule
-            WHERE  telegram_id = $1
+            SELECT c.course_code, c.course_name,
+                   ses.session_type::text  AS session_type,
+                   ses.day_of_week::text   AS day_of_week,
+                   ses.start_time, ses.end_time,
+                   ses.location,
+                   p.professor_name,
+                   e.semester::text        AS semester
+            FROM   students    s
+            JOIN   enrollments e   ON s.student_id    = e.student_id
+            JOIN   sessions    ses ON e.session_id    = ses.session_id
+            JOIN   courses     c   ON ses.course_id   = c.course_id
+            JOIN   professors  p   ON ses.professor_id = p.professor_id
+            WHERE  s.telegram_id = $1
+              AND  s.is_active   = TRUE
             ORDER BY
-                CASE day_of_week::text
+                CASE ses.day_of_week::text
                     WHEN 'Sunday'    THEN 0 WHEN 'Monday'    THEN 1
                     WHEN 'Tuesday'   THEN 2 WHEN 'Wednesday' THEN 3
                     WHEN 'Thursday'  THEN 4 WHEN 'Friday'    THEN 5
                     ELSE 6
-                END, start_time
-            """, tg_id,
+                END,
+                ses.start_time
+            """,
+            tg_id,
         )
 
 async def db_attendance(student_id: int) -> list:
     async with pool().acquire() as c:
         return await c.fetch(
             """
-            SELECT c.course_name, ses.session_type::text AS session_type,
-                COUNT(*) FILTER (WHERE a.status='Present') AS present,
-                COUNT(*) FILTER (WHERE a.status='Absent')  AS absent,
-                COUNT(*) FILTER (WHERE a.status='Late')    AS late,
-                COUNT(*) FILTER (WHERE a.status='Excused') AS excused,
-                COUNT(*) AS total
-            FROM attendance a
-            JOIN sessions   ses ON a.session_id = ses.session_id
-            JOIN courses    c   ON ses.course_id = c.course_id
-            WHERE a.student_id = $1
-            GROUP BY c.course_name, ses.session_type
-            ORDER BY c.course_name
-            """, student_id,
+            SELECT c.course_name,
+                   ses.session_type::text                          AS session_type,
+                   COUNT(a.attendance_id) FILTER
+                       (WHERE a.status = 'Present')                AS present,
+                   COUNT(a.attendance_id) FILTER
+                       (WHERE a.status = 'Absent')                 AS absent,
+                   COUNT(a.attendance_id) FILTER
+                       (WHERE a.status = 'Late')                   AS late,
+                   COUNT(a.attendance_id) FILTER
+                       (WHERE a.status = 'Excused')                AS excused,
+                   COUNT(a.attendance_id)                          AS total
+            FROM   enrollments    e
+            JOIN   sessions       ses ON e.session_id  = ses.session_id
+            JOIN   courses        c   ON ses.course_id  = c.course_id
+            LEFT JOIN attendance  a   ON a.student_id  = e.student_id
+                                     AND a.session_id  = e.session_id
+            WHERE  e.student_id = $1
+            GROUP  BY c.course_name, ses.session_type
+            ORDER  BY c.course_name
+            """,
+            student_id,
         )
 
 async def db_grades(student_id: int) -> list:
@@ -190,7 +200,6 @@ async def db_log(
         logger.warning("Log failed: %s", e)
 
 async def db_student_profile(student_id: int) -> Optional[asyncpg.Record]:
-    """بيانات الطالب الشخصية الكاملة مع اسم القسم والكلية."""
     async with pool().acquire() as c:
         return await c.fetchrow(
             """
@@ -211,32 +220,31 @@ async def db_student_profile(student_id: int) -> Optional[asyncpg.Record]:
 
 
 async def db_gpa_detail(student_id: int) -> dict:
-    """GPA لكل فصل + إجمالي + توزيع الدرجات."""
     async with pool().acquire() as c:
-        # GPA per semester
         by_sem = await c.fetch(
             """
-            SELECT e.semester::text                 AS semester,
-                   ROUND(AVG(e.gpa)::numeric, 2)    AS avg_gpa,
-                   COUNT(*)                          AS courses
+            SELECT e.semester::text                  AS semester,
+                   ROUND(AVG(e.gpa)::numeric, 2)     AS avg_gpa,
+                   COUNT(*) FILTER (WHERE e.gpa IS NOT NULL) AS graded,
+                   COUNT(*)                           AS total
             FROM   enrollments e
-            WHERE  e.student_id = $1 AND e.gpa IS NOT NULL
+            WHERE  e.student_id = $1
             GROUP  BY e.semester
             ORDER  BY e.semester DESC
             """,
             student_id,
         )
-        # Overall GPA
         overall = await c.fetchrow(
             """
-            SELECT ROUND(AVG(gpa)::numeric, 2) AS overall_gpa,
-                   COUNT(*)                     AS total_courses
-            FROM   enrollments
-            WHERE  student_id = $1 AND gpa IS NOT NULL
+            SELECT
+                ROUND(AVG(gpa)::numeric, 2)              AS overall_gpa,
+                COUNT(*) FILTER (WHERE gpa IS NOT NULL)  AS graded_courses,
+                COUNT(*)                                  AS total_enrolled
+            FROM enrollments
+            WHERE student_id = $1
             """,
             student_id,
         )
-        # Grade distribution
         dist = await c.fetch(
             """
             SELECT grade::text AS grade, COUNT(*) AS cnt
@@ -251,7 +259,6 @@ async def db_gpa_detail(student_id: int) -> dict:
 
 
 async def db_available_sessions(student_id: int) -> list:
-    """جلسات متاحة في قسم الطالب لم يسجّل فيها بعد."""
     async with pool().acquire() as c:
         return await c.fetch(
             """
@@ -260,18 +267,25 @@ async def db_available_sessions(student_id: int) -> list:
                    ses.session_type::text AS session_type,
                    ses.day_of_week::text  AS day_of_week,
                    ses.start_time, ses.end_time,
-                   ses.location, ses.semester::text AS semester,
+                   ses.location,
+                   ses.semester::text     AS semester,
                    p.professor_name
-            FROM   sessions    ses
-            JOIN   courses     c ON ses.course_id    = c.course_id
-            JOIN   professors  p ON ses.professor_id = p.professor_id
-            WHERE  c.department_id = (
-                       SELECT department_id FROM students WHERE student_id = $1
+            FROM   sessions   ses
+            JOIN   courses    c ON ses.course_id    = c.course_id
+            JOIN   professors p ON ses.professor_id = p.professor_id
+            WHERE  ses.course_id IN (
+                       -- فقط مواد سجّلها الطالب
+                       SELECT course_id
+                       FROM   student_courses
+                       WHERE  student_id = $1
                    )
               AND  ses.session_id NOT IN (
-                       SELECT session_id FROM enrollments WHERE student_id = $1
+                       -- استثنِ السيكشنات المحجوزة مسبقاً
+                       SELECT session_id
+                       FROM   enrollments
+                       WHERE  student_id = $1
                    )
-            ORDER  BY c.course_name, ses.session_type
+            ORDER  BY c.course_name, ses.session_type::text
             LIMIT  30
             """,
             student_id,
@@ -279,9 +293,7 @@ async def db_available_sessions(student_id: int) -> list:
 
 
 async def db_enroll_session(student_id: int, session_id: int) -> bool:
-    """
-    يسجّل الطالب في جلسة — يُعيد True لو نجح، False لو كان مسجّلاً مسبقاً.
-    """
+ 
     async with pool().acquire() as c:
         result = await c.execute(
             """
@@ -294,8 +306,8 @@ async def db_enroll_session(student_id: int, session_id: int) -> bool:
     return result.endswith("1")  # "INSERT 0 1" → True
 
 
+
 async def db_available_courses(student_id: int) -> list:
-    """مواد القسم التي لم يسجّلها الطالب بعد."""
     async with pool().acquire() as c:
         return await c.fetch(
             """
@@ -317,26 +329,50 @@ async def db_available_courses(student_id: int) -> list:
 
 
 async def db_register_course(student_id: int, course_id: int) -> bool:
-    """يسجّل مادة للطالب — يُعيد True لو نجح."""
     from datetime import datetime
-    year = datetime.now().year
-    academic_year = f"{year}/{year + 1}"
+    academic_year = f"{datetime.now().year}/{datetime.now().year + 1}"
     async with pool().acquire() as c:
         result = await c.execute(
             """
             INSERT INTO student_courses
                 (student_id, course_id, semester, academic_year)
-            SELECT $1, $2, semester, $3
-            FROM   courses WHERE course_id = $2
-            ON CONFLICT DO NOTHING
+            SELECT $1, $2, c.semester, $3
+            FROM   courses c
+            WHERE  c.course_id = $2
+              AND  c.semester IS NOT NULL
+            ON CONFLICT (student_id, course_id, semester, academic_year)
+            DO NOTHING
             """,
             student_id, course_id, academic_year,
         )
     return result.endswith("1")
 
-# ═══════════════════════════════════════════════════════════════
+async def db_registered_courses(student_id: int) -> list:
+ 
+    async with pool().acquire() as c:
+        return await c.fetch(
+            """
+            SELECT c.course_code, c.course_name,
+                   sc.semester::text  AS semester,
+                   sc.academic_year,
+                   c.credit_hours,
+                   c.study_year,
+                   -- هل الطالب حجز سيكشن لهذه المادة؟
+                   EXISTS (
+                       SELECT 1 FROM enrollments e
+                       JOIN sessions ses ON e.session_id = ses.session_id
+                       WHERE e.student_id = $1
+                         AND ses.course_id = c.course_id
+                   ) AS has_session
+            FROM   student_courses sc
+            JOIN   courses         c ON sc.course_id = c.course_id
+            WHERE  sc.student_id = $1
+            ORDER  BY sc.academic_year DESC, c.course_name
+            """,
+            student_id,
+        )
+
 #  UI HELPERS
-# ═══════════════════════════════════════════════════════════════
 
 def user_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
@@ -353,7 +389,6 @@ def user_keyboard() -> ReplyKeyboardMarkup:
     )
 
 def main_menu_kb() -> InlineKeyboardMarkup:
-    """أزرار Inline تظهر داخل الرسالة."""
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📅 جدولي",      callback_data="schedule"),
@@ -366,7 +401,6 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⭐ تقييم أستاذ",   callback_data="feedback")],
     ])
 
-# أزرار ReplyKeyboard — filter لاستثنائها من حقل الرقم القومي
 BUTTON_TEXTS = [
     "📅 جدولي", "✅ الحضور",
     "🎓 درجاتي", "📊 تفاصيل GPA",
@@ -448,43 +482,56 @@ def fmt_profile(r: asyncpg.Record) -> str:
 
 
 def fmt_gpa_detail(data: dict) -> str:
-    overall  = data["overall"]
-    by_sem   = data["by_semester"]
-    dist     = data["distribution"]
+    overall = data["overall"]
+    by_sem  = data["by_semester"]
+    dist    = data["distribution"]
 
-    if not overall or overall["overall_gpa"] is None:
-        return "📭 لا توجد بيانات GPA بعد."
+    total_enrolled = overall["total_enrolled"] if overall else 0
+    graded         = overall["graded_courses"] if overall else 0
 
-    # Overall
+    # مواد مسجلة بس مفيش درجات بعد
+    if total_enrolled == 0:
+        return "📭 لا توجد مواد مسجلة بعد."
+
+    if graded == 0:
+        return (
+            f"📊 *تفاصيل GPA*\n\n"
+            f"📚 مواد مسجلة: *{total_enrolled}*\n"
+            f"⏳ لا توجد درجات مسجّلة بعد.\n"
+            f"_ستظهر تفاصيل GPA بعد رصد الدرجات._"
+        )
+
     gpa_val = float(overall["overall_gpa"])
     if gpa_val >= 3.7:
-        grade_label = "ممتاز 🏆"
+        label = "ممتاز 🏆"
     elif gpa_val >= 3.0:
-        grade_label = "جيد جداً ⭐"
+        label = "جيد جداً ⭐"
     elif gpa_val >= 2.0:
-        grade_label = "جيد 👍"
+        label = "جيد 👍"
     else:
-        grade_label = "مقبول ⚠️"
+        label = "مقبول ⚠️"
 
     lines = [
         "📊 *تفاصيل GPA*\n",
-        f"🎯 الـ GPA الإجمالي: *{gpa_val:.2f} / 4.00*  —  {grade_label}",
-        f"📚 إجمالي المواد: {overall['total_courses']}\n",
+        f"🎯 GPA الإجمالي: *{gpa_val:.2f} / 4.00*  —  {label}",
+        f"📚 مواد مسجلة: *{total_enrolled}*  |  مقيّمة: *{graded}*\n",
     ]
 
-    # Per semester
     if by_sem:
         lines.append("*GPA لكل فصل:*")
         for r in by_sem:
-            bar_len  = int(float(r["avg_gpa"]) / 4.0 * 10)
-            bar      = "█" * bar_len + "░" * (10 - bar_len)
+            if r["graded"] == 0:
+                lines.append(f"  📅 {r['semester']}  —  {r['total']} مادة  ⏳ لا درجات بعد")
+                continue
+            bar_len = int(float(r["avg_gpa"]) / 4.0 * 10)
+            bar     = "█" * bar_len + "░" * (10 - bar_len)
             lines.append(
                 f"  📅 {r['semester']}\n"
-                f"     {bar} *{r['avg_gpa']}*  ({r['courses']} مواد)"
+                f"     {bar} *{r['avg_gpa']}*"
+                f"  ({r['graded']}/{r['total']} مواد)"
             )
         lines.append("")
 
-    # Grade distribution
     if dist:
         lines.append("*توزيع الدرجات:*")
         for r in dist:
@@ -505,9 +552,7 @@ async def require_student(
     return s
 
 
-# ═══════════════════════════════════════════════════════════════
 #  /start — ONBOARDING
-# ═══════════════════════════════════════════════════════════════
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     s = await db_student_by_tg(update.effective_user.id)
@@ -563,9 +608,7 @@ async def recv_national_id(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
-# ═══════════════════════════════════════════════════════════════
 #  STANDALONE COMMANDS
-# ═══════════════════════════════════════════════════════════════
 
 async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     s = await require_student(update, ctx)
@@ -633,16 +676,33 @@ async def cmd_courses(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     s = await require_student(update, ctx)
     if not s:
         return
-    sessions = await db_enrolled_sessions(s["student_id"])
-    if not sessions:
-        await update.effective_message.reply_text("📭 لا توجد مواد مسجلة حالياً.")
-        return
-    lines = ["📚 *موادي المسجلة:*\n"]
-    for r in sessions:
-        lines.append(
-            f"• *{r['course_name']}* [{r['session_type']}] — {r['professor_name']}"
+
+    courses = await db_registered_courses(s["student_id"])
+    if not courses:
+        await update.effective_message.reply_text(
+            "📭 لا توجد مواد مسجلة حالياً.\n"
+            "اضغط ➕ تسجيل مادة لإضافة مواد."
         )
-    await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+        return
+
+    lines = ["📚 *موادي المسجلة:*\n"]
+    for r in courses:
+        # أيقونة تُشير هل حجز سيكشن أم لا
+        session_status = "✅ محجوز" if r["has_session"] else "⚠️ لم تحجز سيكشن بعد"
+        lines.append(
+            f"• *{r['course_code']}* — {r['course_name']}\n"
+            f"  📅 {r['semester']} | سنة {r['study_year']} "
+            f"| {r['credit_hours']} ساعات\n"
+            f"  {session_status}"
+        )
+
+    lines.append(
+        "\n_💡 المواد التي عليها ⚠️ لن تظهر في الجدول أو الدرجات "
+        "حتى تحجز سيكشن من 📋 حجز سيكشن_"
+    )
+    await update.effective_message.reply_text(
+        "\n".join(lines), parse_mode="Markdown"
+    )
 
 async def cmd_profile(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     s = await require_student(update, ctx)
@@ -662,7 +722,6 @@ async def cmd_gpa_detail(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
     await update.effective_message.reply_text(text, parse_mode="Markdown")
 
 
-# ── حجز سيكشن ────────────────────────────────────────────────
 async def cmd_enroll_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if update.callback_query:
         await update.callback_query.answer()
@@ -712,14 +771,14 @@ async def enroll_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if success:
         await q.edit_message_text(
             "✅ تم الحجز بنجاح!\n"
-            "ستجد الجلسة في جدولك. اضغط 📅 جدولي للتحقق."
+            "اضغط 📅 جدولي لمشاهدة موعد السيكشن."
         )
     else:
         await q.edit_message_text("⚠️ أنت مسجّل في هذه الجلسة مسبقاً.")
+
     return ConversationHandler.END
 
 
-# ── تسجيل مادة جديدة ──────────────────────────────────────────
 async def cmd_course_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if update.callback_query:
         await update.callback_query.answer()
@@ -792,9 +851,7 @@ async def text_router(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await fn(update, ctx)
 
 
-# ═══════════════════════════════════════════════════════════════
 #  /feedback — MULTI-STEP CONVERSATION
-# ═══════════════════════════════════════════════════════════════
 
 async def feedback_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if update.callback_query:
@@ -886,9 +943,7 @@ async def feedback_comment(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
-# ═══════════════════════════════════════════════════════════════
 #  CALLBACK ROUTER (Inline buttons)
-# ═══════════════════════════════════════════════════════════════
 
 async def menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.callback_query.answer()
@@ -920,9 +975,7 @@ async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         )
 
 
-# ═══════════════════════════════════════════════════════════════
 #  APP WIRING
-# ═══════════════════════════════════════════════════════════════
 
 async def post_init(app: Application) -> None:
     global _pool
@@ -1021,19 +1074,18 @@ def build_app() -> Application:
 
     app.add_handler(onboarding)
     app.add_handler(feedback)
-    app.add_handler(enroll_conv)   # ← جديد
-    app.add_handler(course_conv)   # ← جديد
+    app.add_handler(enroll_conv)   
+    app.add_handler(course_conv)   
 
     for cmd, fn in [
         ("menu",       cmd_menu),
         ("schedule",   cmd_schedule),
         ("attendance", cmd_attendance),
         ("grades",     cmd_grades),
-        ("gpa",        cmd_gpa_detail),     # ← جديد
-        ("courses",    cmd_courses),
-        ("profile",    cmd_profile),        # ← جديد
-        ("enroll",     cmd_enroll_start),   # ← جديد
-        ("regcourse",  cmd_course_start),   # ← جديد
+        ("gpa",        cmd_gpa_detail),     
+        ("profile",    cmd_profile),        
+        ("enroll",     cmd_enroll_start),   
+        ("regcourse",  cmd_course_start),  
         ("help",       cmd_help),
     ]:
         app.add_handler(CommandHandler(cmd, fn))
@@ -1044,17 +1096,13 @@ def build_app() -> Application:
             pattern=r"^(schedule|attendance|grades|courses)$",
         )
     )
-    # ← أزرار ReplyKeyboard الدائمة
     app.add_handler(MessageHandler(button_filter, text_router))
 
     app.add_error_handler(on_error)
     return app
 
 
-# ═══════════════════════════════════════════════════════════════
-#  COLAB ENTRY POINT
-#  run_polling تشتغل مباشرةً بعد nest_asyncio.apply()
-# ═══════════════════════════════════════════════════════════════
+
 build_app().run_polling(
     drop_pending_updates=True,
     allowed_updates=Update.ALL_TYPES,
