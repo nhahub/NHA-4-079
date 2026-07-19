@@ -33,6 +33,7 @@
 - [Running the Project](#running-the-project)
 - [Usage Examples](#usage-examples)
 - [Kafka Event Schemas](#kafka-event-schemas)
+- [Simulating the Attendance System](#simulating-the-attendance-system)
 - [Analytics Tables](#analytics-tables)
 - [Development Workflow](#development-workflow)
 - [Testing](#testing)
@@ -41,6 +42,7 @@
 - [Deployment](#deployment)
 - [Environment Variables](#environment-variables)
 - [Known Issues & Future Improvements](#known-issues--future-improvements)
+- [Dashboard Showcase](#dashboard-showcase)
 - [Authors & Acknowledgments](#authors--acknowledgments)
 
 ---
@@ -558,6 +560,23 @@ All events share a standard envelope:
 
 ---
 
+## Simulating the Attendance System
+
+To test and demo the full pipeline end-to-end — Kafka → DB Consumer / Analytics Consumer → Power BI dashboard — without waiting on real students to interact with the Telegram Bot, the project includes two standalone scripts that simulate the university attendance workflow:
+
+| File | Role |
+|---|---|
+| [`attendance_producer.py`](attendance_producer.py) | **Kafka Producer** — generates simulated attendance events (check-ins, absences, excused/late records) for students across courses and sessions, and publishes them to the attendance topic |
+| [`attendance_consumer.py`](attendance_consumer.py) | **Kafka Consumer** — subscribes to the topic under the `attendance_writer` consumer group, consumes the simulated events, and writes them into PostgreSQL exactly like the production DB Consumer |
+
+This lets the Analytics Consumer and Power BI dashboard be populated and verified with realistic attendance data on demand, independent of live bot traffic. Messages can be inspected live in the Kafka UI (`http://localhost:8080`) under **Topics → messages**, filtered by the `attendance_writer` consumer group:
+
+![Kafka UI showing simulated attendance messages](kafka.png)
+
+> **Note:** `attendance_producer.py` and `attendance_consumer.py` are placeholder filenames — replace them with the actual filenames of your two scripts so the links resolve correctly.
+
+---
+
 ## Analytics Tables
 
 The analytics consumer writes pre-aggregated snapshots every 30 seconds. Power BI connects to these tables via Supabase's direct connection.
@@ -898,6 +917,16 @@ A Helm chart and Kubernetes manifests for production deployment are planned. See
 
 ---
 
+## Dashboard Showcase
+
+Alongside the bot and streaming pipeline, the team built a **Power BI analytics dashboard** on top of the data the Analytics Consumer streams into the snapshot tables. Its role is to turn raw Kafka-streamed attendance and enrollment events into a live, filterable view for university admins — surfacing overall attendance rate, student/course/professor/session counts, attendance status breakdown (Present/Absent/Late/Excused), department-level attendance, enrollment-year and gender distribution, and session-type mix, filterable by semester (Fall/Spring).
+
+![University Attendance Analytics Dashboard — Fall](dashboard.png)
+
+![University Attendance Analytics Dashboard — Spring](dashboard_2.png)
+
+---
+
 ## Authors & Acknowledgments
 
 This project was built as part of a **Data Engineering** track under the **Digital Egypt** initiative.
@@ -911,4 +940,3 @@ This project was built as part of a **Data Engineering** track under the **Digit
 | Data Engineer | Ahmed Ramadan |
 
 ---
-
