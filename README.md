@@ -566,8 +566,8 @@ To test and demo the full pipeline end-to-end — Kafka → DB Consumer / Analyt
 
 | File | Role |
 |---|---|
-| [`attendance_producer.py`](attendance_producer.py) | **Kafka Producer** — generates simulated attendance events (check-ins, absences, excused/late records) for students across courses and sessions, and publishes them to the attendance topic |
-| [`attendance_consumer.py`](attendance_consumer.py) | **Kafka Consumer** — subscribes to the topic under the `attendance_writer` consumer group, consumes the simulated events, and writes them into PostgreSQL exactly like the production DB Consumer |
+| [`attendance_producer.py`](sim_producer.py) | **Kafka Producer** — generates simulated attendance events (check-ins, absences, excused/late records) for students across courses and sessions, and publishes them to the attendance topic |
+| [`attendance_consumer.py`](sim_consumer.py) | **Kafka Consumer** — subscribes to the topic under the `attendance_writer` consumer group, consumes the simulated events, and writes them into PostgreSQL exactly like the production DB Consumer |
 
 This lets the Analytics Consumer and Power BI dashboard be populated and verified with realistic attendance data on demand, independent of live bot traffic. Messages can be inspected live in the Kafka UI (`http://localhost:8080`) under **Topics → messages**, filtered by the `attendance_writer` consumer group:
 
