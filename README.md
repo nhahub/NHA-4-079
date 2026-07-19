@@ -923,7 +923,7 @@ Alongside the bot and streaming pipeline, the team built a **Power BI analytics 
 
 ![University Attendance Analytics Dashboard — Fall](dashboard.png)
 
-![University Attendance Analytics Dashboard — Spring](dashboard_2.png)
+![University Attendance Analytics Dashboard — Spring](https://github.com/nhahub/NHA-4-079/blob/main/dashboard%202.png)
 
 ---
 
